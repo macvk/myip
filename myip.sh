@@ -39,7 +39,7 @@ function echo_ip {
 
 function ip2long {
     if [ `echo $1 | tr '.' '\n' | wc -l` != "4" ]; then
-        echo "No real ip given"
+        echo "0"
         exit
     fi
     echo "$1" | awk -F\. '{print ($4)+($3*256)+($2*256*256)+($1*256*256*256)}'
