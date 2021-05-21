@@ -101,6 +101,7 @@ ipv6_list=$(ip -6 addr | grep inet6 | awk -F '[ \t]+|/' '{print $3}' | grep -v ^
 if [ ! -z "$ipv4" ]; then
     echo_ip $ipv4 "Your IPv4:"
     ips+=("$ipv4")
+    ipv4_count=1
 
     while IFS= read -r line; do
         if [ ! -z $(islocalip $line) ]; then
@@ -115,16 +116,19 @@ if [ ! -z "$ipv4" ]; then
             continue
         fi
         ips+=("$ip")
+        ipv4_count=$((ipv4_count+1))
 
         echo_ip $ip ""
     done <<< "$ipv4_list"
 
+    echo "Found IPv4: $ipv4_count addresses"
 
 fi
 
 if [ ! -z "$ipv6" ]; then
     echo_ip $ipv6 "Your IPv6:"
 
+    ipv6_count=1
     ips+=("$ipv6")
 
     while IFS= read -r line; do
@@ -140,8 +144,12 @@ if [ ! -z "$ipv6" ]; then
             continue
         fi
         ips+=("$ip")
+        ipv6_count=$((ipv6_count+1))
+
         echo_ip $ip ""
     done <<< "$ipv6_list"
+
+    echo "Found IPv6: $ipv6_count addresses"
 fi
 
 exit 0
