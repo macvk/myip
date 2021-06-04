@@ -98,7 +98,7 @@ if command -v ip &> /dev/null; then
     ipv4_list=$(ip -4 addr | grep -Po "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | grep -v "0\.0\.0\.0")
     ipv6_list=$(ip -6 addr | grep inet6 | awk -F '[ \t]+|/' '{print $3}' | grep -v ^::1 | grep -v ^fe80)
 else
-    ipv4_list=$(ifconfig | grep inet | awk '{print $2}' | grep -v '%' | grep -Po "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | grep -v "0\.0\.0\.0")
+    ipv4_list=$(ifconfig | grep inet | awk '{print $2}' | grep -v '%' | grep -v "::" | grep -v "0\.0\.0\.0")
     ipv6_list=$(ifconfig | grep inet | awk '{print $2}' | grep '%' | cut -d'%' -f 1 | grep -v ^::1 | grep -v ^fe80)
 fi
 
