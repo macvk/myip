@@ -26,7 +26,7 @@ function check_internet_connection {
 }
 
 function echo_ip {
-    j=$(curl --silent "https://${api_domain}/geoiplookup/$1?embed=txt")
+    j=$(curl --silent "https://${api_domain}/geoiplookup/$1?embed=raw")
 
     country=$(echo $j | cut -d '|' -f 2)
     asn=$(echo $j | cut -d '|' -f 3)
