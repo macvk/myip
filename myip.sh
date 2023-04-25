@@ -55,32 +55,12 @@ function ipinrange {
 }
 
 function islocalip {
-    if [ ! -z $(ipinrange $1 "10.0.0.0" "10.255.255.255") ]; then
-        echo "1"
-        exit
-    fi
-
-    if [ ! -z $(ipinrange $1 "172.16.0.0" "172.31.255.255") ]; then
-        echo "1"
-        exit
-    fi
-
-    if [ ! -z $(ipinrange $1 "192.168.0.0" "192.168.255.255") ]; then
-        echo "1"
-        exit
-    fi
-
     if [ ! -z $(ipinrange $1 "169.254.0.0" "169.254.255.255") ]; then
         echo "1"
         exit
     fi
 
     if [ ! -z $(ipinrange $1 "127.0.0.0" "127.255.255.255") ]; then
-        echo "1"
-        exit
-    fi
-
-    if [ ! -z $(ipinrange $1 "100.64.0.0" "100.64.255.255") ]; then
         echo "1"
         exit
     fi
