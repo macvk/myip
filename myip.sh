@@ -1,141 +1,127 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 RED='\033[0;31m'
 BOLD='\033[1m'
 NC='\033[0m'
 api_domain='bash.ws'
+ips=''
 
-function echo_bold {
-    echo -e "${BOLD}${1}${NC}"
+echo_bold() {
+    printf '%b\n' "${BOLD}${1}${NC}"
 }
 
-function check_program_exist {
-    command -v $1 > /dev/null
-    if [ $? -ne 0 ]; then
-        echo "Please, install \"$1\""
+echo_error() {
+    printf '%b\n' "${RED}${1}${NC}" >&2
+}
+
+check_program_exists() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        echo_error "Please, install \"$1\""
         exit 1
     fi
 }
 
-function check_internet_connection {
-    curl --silent --head --request GET "https://${api_domain}" | grep "200 OK" > /dev/null
-    if [ $? -ne 0 ]; then
-        echo "No internet connection."
+check_internet_connection() {
+    if ! curl --silent --head --request GET "https://${api_domain}" |
+        grep -q '200 OK'; then
+        echo_error 'No internet connection.'
         exit 1
     fi
 }
 
-function echo_ip {
-    j=$(curl --silent "https://${api_domain}/geoiplookup/$1?embed=txt")
+echo_ip() {
+    lookup=$(curl --silent "https://${api_domain}/geoiplookup/${1}?embed=txt")
+    country=$(printf '%s\n' "$lookup" | cut -d '|' -f 2)
+    asn=$(printf '%s\n' "$lookup" | cut -d '|' -f 3)
 
-    country=$(echo $j | cut -d '|' -f 2)
-    asn=$(echo $j | cut -d '|' -f 3)
-
-    if [ ! -z "$2" ]; then
+    if [ -n "$2" ]; then
         echo_bold "$2"
     fi
-    echo "$1 [$country, $asn]"
+    printf '%s [%s, %s]\n' "$1" "$country" "$asn"
 }
 
-function ip2long {
-    if [ `echo $1 | tr '.' '\n' | wc -l` != "4" ]; then
-        echo "0"
-        exit
-    fi
-    echo "$1" | awk -F\. '{print ($4)+($3*256)+($2*256*256)+($1*256*256*256)}'
+is_local_ipv4() {
+    case "$1" in
+        127.* | 169.254.*) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
-function ipinrange {
-    num=$(ip2long $1)
-    left=$(ip2long $2)
-    right=$(ip2long $3)
-    if [[ $num -gt $left && $num -lt $right ]]; then
-        echo "1"
-    fi
+has_ip() {
+    [ -n "$ips" ] && printf '%s\n' "$ips" | grep -Fqx "$1"
 }
 
-function islocalip {
-    if [ ! -z $(ipinrange $1 "169.254.0.0" "169.254.255.255") ]; then
-        echo "1"
-        exit
-    fi
-
-    if [ ! -z $(ipinrange $1 "127.0.0.0" "127.255.255.255") ]; then
-        echo "1"
-        exit
+add_ip() {
+    if [ -z "$ips" ]; then
+        ips=$1
+    else
+        ips=$(printf '%s\n%s' "$ips" "$1")
     fi
 }
 
-check_program_exist curl
+check_program_exists curl
 check_internet_connection
-
-ips=()
 
 ipv4=$(curl --silent "https://ipv4.${api_domain}/")
 ipv6=$(curl --silent "https://ipv6.${api_domain}/")
 
-if command -v ip &> /dev/null; then
-    ipv4_list=$(ip -4 addr | grep -Po "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | grep -v "0\.0\.0\.0")
-    ipv6_list=$(ip -6 addr | grep inet6 | awk -F '[ \t]+|/' '{print $3}' | grep -v ^::1 | grep -v ^fe80)
+if command -v ip >/dev/null 2>&1; then
+    ipv4_list=$(ip -o -4 addr show 2>/dev/null |
+        awk '{split($4, address, "/"); if (address[1] != "0.0.0.0") print address[1]}')
+    ipv6_list=$(ip -o -6 addr show 2>/dev/null |
+        awk '{split($4, address, "/"); if (address[1] !~ /^::1$/ && address[1] !~ /^fe80:/) print address[1]}')
 else
-    ipv4_list=$(ifconfig | grep inet | awk '{print $2}' | grep -v '%' | grep -v "::" | grep -v "0\.0\.0\.0")
-    ipv6_list=$(ifconfig | grep inet | awk '{print $2}' | grep '%' | cut -d'%' -f 1 | grep -v ^::1 | grep -v ^fe80)
+    check_program_exists ifconfig
+    ipv4_list=$(ifconfig 2>/dev/null |
+        awk '/inet / {address=$2; sub(/^addr:/, "", address); if (address != "0.0.0.0") print address}')
+    ipv6_list=$(ifconfig 2>/dev/null |
+        awk '/inet6 / {address=$2; sub(/^addr:/, "", address); sub(/%.*/, "", address); if (address !~ /^::1$/ && address !~ /^fe80:/) print address}')
 fi
 
-
-
-if [ ! -z "$ipv4" ]; then
-    echo_ip $ipv4 "Your IPv4:"
-    ips+=("$ipv4")
+if [ -n "$ipv4" ]; then
+    echo_ip "$ipv4" 'Your IPv4:'
+    add_ip "$ipv4"
     ipv4_count=1
 
-    while IFS= read -r line; do
-        if [ ! -z $(islocalip $line) ]; then
+    for address in $ipv4_list; do
+        if is_local_ipv4 "$address"; then
             continue
         fi
 
-        ip=$(curl --silent --interface $line "https://ipv4.${api_domain}/")
-        if [ -z "$ip" ]; then
+        detected_ip=$(curl --silent --interface "$address" "https://ipv4.${api_domain}/")
+        if [ -z "$detected_ip" ] || has_ip "$detected_ip"; then
             continue
         fi
-        if [[ " ${ips[@]} " =~ " ${ip} " ]]; then
-            continue
-        fi
-        ips+=("$ip")
-        ipv4_count=$((ipv4_count+1))
 
-        echo_ip $ip ""
-    done <<< "$ipv4_list"
+        add_ip "$detected_ip"
+        ipv4_count=$((ipv4_count + 1))
+        echo_ip "$detected_ip" ''
+    done
 
-    echo "Found IPv4: $ipv4_count addresses"
-
+    if [ "$ipv4_count" -gt 1 ]; then
+        printf 'Found IPv4: %s addresses\n' "$ipv4_count"
+    fi
 fi
 
-if [ ! -z "$ipv6" ]; then
-    echo_ip $ipv6 "Your IPv6:"
-
+if [ -n "$ipv6" ]; then
+    echo_ip "$ipv6" 'Your IPv6:'
+    add_ip "$ipv6"
     ipv6_count=1
-    ips+=("$ipv6")
 
-    while IFS= read -r line; do
-        if [ ! -z $(islocalip $line) ]; then
+    for address in $ipv6_list; do
+        detected_ip=$(curl --silent --interface "$address" "https://ipv6.${api_domain}/")
+        if [ -z "$detected_ip" ] || has_ip "$detected_ip"; then
             continue
         fi
 
-        ip=$(curl --silent --interface $line "https://ipv6.${api_domain}/")
-        if [ -z "$ip" ]; then
-            continue
-        fi
-        if [[ " ${ips[@]} " =~ " ${ip} " ]]; then
-            continue
-        fi
-        ips+=("$ip")
-        ipv6_count=$((ipv6_count+1))
+        add_ip "$detected_ip"
+        ipv6_count=$((ipv6_count + 1))
+        echo_ip "$detected_ip" ''
+    done
 
-        echo_ip $ip ""
-    done <<< "$ipv6_list"
-
-    echo "Found IPv6: $ipv6_count addresses"
+    if [ "$ipv6_count" -gt 1 ]; then
+        printf 'Found IPv6: %s addresses\n' "$ipv6_count"
+    fi
 fi
 
 exit 0
