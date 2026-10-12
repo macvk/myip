@@ -1,127 +1,210 @@
 #!/bin/sh
 
-RED='\033[0;31m'
+# Public IP address client for bash.ws.
+# Project: https://github.com/macvk/myip
+# SPDX-License-Identifier: MIT
+
 BOLD='\033[1m'
 NC='\033[0m'
 api_domain='bash.ws'
-ips=''
+request_timeout=10
+seen_ips=''
+total_found=0
 
 echo_bold() {
     printf '%b\n' "${BOLD}${1}${NC}"
 }
 
 echo_error() {
-    printf '%b\n' "${RED}${1}${NC}" >&2
+    printf '%s\n' "$1" >&2
 }
 
-check_program_exists() {
-    if ! command -v "$1" >/dev/null 2>&1; then
+require_command() {
+    if ! command -v "$1" > /dev/null 2>&1; then
         echo_error "Please, install \"$1\""
         exit 1
     fi
 }
 
-check_internet_connection() {
-    if ! curl --silent --head --request GET "https://${api_domain}" |
-        grep -q '200 OK'; then
-        echo_error 'No internet connection.'
-        exit 1
+remember_ip() {
+    if [ -n "$seen_ips" ]; then
+        seen_ips="${seen_ips}
+$1"
+    else
+        seen_ips=$1
     fi
 }
 
-echo_ip() {
-    lookup=$(curl --silent "https://${api_domain}/geoiplookup/${1}?embed=txt")
-    country=$(printf '%s\n' "$lookup" | cut -d '|' -f 2)
-    asn=$(printf '%s\n' "$lookup" | cut -d '|' -f 3)
-
-    if [ -n "$2" ]; then
-        echo_bold "$2"
-    fi
-    printf '%s [%s, %s]\n' "$1" "$country" "$asn"
+ip_seen() {
+    [ -n "$seen_ips" ] && printf '%s\n' "$seen_ips" | grep -F -x "$1" > /dev/null 2>&1
 }
 
-is_local_ipv4() {
-    case "$1" in
-        127.* | 169.254.*) return 0 ;;
+valid_address() {
+    address=$1
+    family=$2
+
+    if [ "$family" -eq 4 ]; then
+        printf '%s\n' "$address" | awk -F. '
+            NF != 4 { exit 1 }
+            {
+                for (i = 1; i <= 4; i++) {
+                    if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) exit 1
+                }
+            }
+        '
+        return
+    fi
+
+    case "$address" in
+        *[!0-9A-Fa-f:.]*) return 1 ;;
+        *:*) return 0 ;;
         *) return 1 ;;
     esac
 }
 
-has_ip() {
-    [ -n "$ips" ] && printf '%s\n' "$ips" | grep -Fqx "$1"
-}
+usable_source() {
+    source_address=$1
+    family=$2
 
-add_ip() {
-    if [ -z "$ips" ]; then
-        ips=$1
+    if ! valid_address "$source_address" "$family"; then
+        return 1
+    fi
+
+    if [ "$family" -eq 4 ]; then
+        case "$source_address" in
+            0.*|127.*|169.254.*|22[4-9].*|23[0-9].*) return 1 ;;
+        esac
     else
-        ips=$(printf '%s\n%s' "$ips" "$1")
+        source_lower=$(printf '%s\n' "$source_address" | tr 'A-F' 'a-f')
+
+        case "$source_lower" in
+            ::|::1|fe8*|fe9*|fea*|feb*|ff*) return 1 ;;
+        esac
+    fi
+
+    return 0
+}
+
+local_addresses() {
+    family=$1
+
+    if command -v ip > /dev/null 2>&1; then
+        ip -o "-${family}" address show up 2>/dev/null | awk '
+            {
+                address = $4
+                sub(/\/.*/, "", address)
+                print address
+            }
+        '
+        return
+    fi
+
+    if command -v ifconfig > /dev/null 2>&1; then
+        if [ "$family" -eq 4 ]; then
+            ifconfig 2>/dev/null | awk '
+                /inet / {
+                    for (i = 1; i < NF; i++) {
+                        if ($i == "inet") {
+                            address = $(i + 1)
+                            sub(/^addr:/, "", address)
+                            print address
+                        }
+                    }
+                }
+            '
+        else
+            ifconfig 2>/dev/null | awk '
+                /inet6 / {
+                    for (i = 1; i < NF; i++) {
+                        if ($i == "inet6") {
+                            address = $(i + 1)
+                            sub(/^addr:/, "", address)
+                            sub(/%.*/, "", address)
+                            print address
+                        }
+                    }
+                }
+            '
+        fi
     fi
 }
 
-check_program_exists curl
-check_internet_connection
+request_address() {
+    family=$1
+    source_address=$2
+    endpoint="https://ipv${family}.${api_domain}/"
 
-ipv4=$(curl --silent "https://ipv4.${api_domain}/")
-ipv6=$(curl --silent "https://ipv6.${api_domain}/")
+    if [ -n "$source_address" ]; then
+        curl --silent --show-error --fail --max-time "$request_timeout" --interface "$source_address" "$endpoint" 2>/dev/null
+    else
+        curl --silent --show-error --fail --max-time "$request_timeout" "$endpoint" 2>/dev/null
+    fi
+}
 
-if command -v ip >/dev/null 2>&1; then
-    ipv4_list=$(ip -o -4 addr show 2>/dev/null |
-        awk '{split($4, address, "/"); if (address[1] != "0.0.0.0") print address[1]}')
-    ipv6_list=$(ip -o -6 addr show 2>/dev/null |
-        awk '{split($4, address, "/"); if (address[1] !~ /^::1$/ && address[1] !~ /^fe80:/) print address[1]}')
-else
-    check_program_exists ifconfig
-    ipv4_list=$(ifconfig 2>/dev/null |
-        awk '/inet / {address=$2; sub(/^addr:/, "", address); if (address != "0.0.0.0") print address}')
-    ipv6_list=$(ifconfig 2>/dev/null |
-        awk '/inet6 / {address=$2; sub(/^addr:/, "", address); sub(/%.*/, "", address); if (address !~ /^::1$/ && address !~ /^fe80:/) print address}')
-fi
+address_details() {
+    address=$1
+    details=$(curl --silent --show-error --fail --max-time "$request_timeout" "https://${api_domain}/geoiplookup/${address}?embed=txt" 2>/dev/null || :)
+    country=$(printf '%s\n' "$details" | cut -d '|' -f 2)
+    asn=$(printf '%s\n' "$details" | cut -d '|' -f 3)
 
-if [ -n "$ipv4" ]; then
-    echo_ip "$ipv4" 'Your IPv4:'
-    add_ip "$ipv4"
-    ipv4_count=1
+    if [ -z "$country" ]; then
+        printf '%s\n' "$address"
+    elif [ -z "$asn" ]; then
+        printf '%s [%s]\n' "$address" "$country"
+    else
+        printf '%s [%s, %s]\n' "$address" "$country" "$asn"
+    fi
+}
 
-    for address in $ipv4_list; do
-        if is_local_ipv4 "$address"; then
+scan_family() {
+    family=$1
+    sources=$(local_addresses "$family")
+    count=0
+
+    for source_address in '' $sources; do
+        if [ -n "$source_address" ] && ! usable_source "$source_address" "$family"; then
             continue
         fi
 
-        detected_ip=$(curl --silent --interface "$address" "https://ipv4.${api_domain}/")
-        if [ -z "$detected_ip" ] || has_ip "$detected_ip"; then
+        address=$(request_address "$family" "$source_address" || :)
+
+        if ! valid_address "$address" "$family" || ip_seen "$address"; then
             continue
         fi
 
-        add_ip "$detected_ip"
-        ipv4_count=$((ipv4_count + 1))
-        echo_ip "$detected_ip" ''
+        if [ "$count" -eq 0 ]; then
+            if [ "$total_found" -ne 0 ]; then
+                printf '\n'
+            fi
+
+            echo_bold "Your IPv${family}:"
+        fi
+
+        remember_ip "$address"
+        address_details "$address"
+        count=$((count + 1))
+        total_found=$((total_found + 1))
     done
 
-    if [ "$ipv4_count" -gt 1 ]; then
-        printf 'Found IPv4: %s addresses\n' "$ipv4_count"
+    if [ "$count" -eq 1 ]; then
+        printf 'Found IPv%s: 1 address\n' "$family"
+    elif [ "$count" -gt 1 ]; then
+        printf 'Found IPv%s: %s addresses\n' "$family" "$count"
     fi
-fi
+}
 
-if [ -n "$ipv6" ]; then
-    echo_ip "$ipv6" 'Your IPv6:'
-    add_ip "$ipv6"
-    ipv6_count=1
+require_command curl
+require_command awk
+require_command cut
+require_command grep
+require_command tr
 
-    for address in $ipv6_list; do
-        detected_ip=$(curl --silent --interface "$address" "https://ipv6.${api_domain}/")
-        if [ -z "$detected_ip" ] || has_ip "$detected_ip"; then
-            continue
-        fi
+scan_family 4
+scan_family 6
 
-        add_ip "$detected_ip"
-        ipv6_count=$((ipv6_count + 1))
-        echo_ip "$detected_ip" ''
-    done
-
-    if [ "$ipv6_count" -gt 1 ]; then
-        printf 'Found IPv6: %s addresses\n' "$ipv6_count"
-    fi
+if [ "$total_found" -eq 0 ]; then
+    echo_error 'My IP failed: no public IPv4 or IPv6 address was detected.'
+    exit 1
 fi
 
 exit 0
