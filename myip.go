@@ -152,25 +152,31 @@ func addressDetails(address string) string {
 	}
 
 	fields := strings.Split(value, "|")
-	var country, asn string
+	location := make([]string, 0, len(fields))
+
+	for index := len(fields) - 2; index >= 2; index-- {
+		if field := strings.TrimSpace(fields[index]); field != "" {
+			location = append(location, field)
+		}
+	}
 
 	if len(fields) > 1 {
-		country = strings.TrimSpace(fields[1])
+		if country := strings.TrimSpace(fields[1]); country != "" {
+			location = append(location, country)
+		}
 	}
 
 	if len(fields) > 2 {
-		asn = strings.TrimSpace(fields[2])
+		if asn := strings.TrimSpace(fields[len(fields)-1]); asn != "" {
+			location = append(location, asn)
+		}
 	}
 
-	if country == "" {
+	if len(location) == 0 {
 		return address
 	}
 
-	if asn == "" {
-		return fmt.Sprintf("%s [%s]", address, country)
-	}
-
-	return fmt.Sprintf("%s [%s, %s]", address, country, asn)
+	return fmt.Sprintf("%s [%s]", address, strings.Join(location, ", "))
 }
 
 func printAddresses(family int, addresses []string) {

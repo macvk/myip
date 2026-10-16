@@ -82,13 +82,16 @@ if not errorlevel 1 exit /b 0
 >> "%all_list%" echo %address%
 set "details="
 
-for /f "tokens=1-3 delims=|" %%A in ('curl.exe --silent --show-error --fail --max-time 10 "https://%api_domain%/geoiplookup/%address%?embed=txt" 2^>nul') do (
+for /f "tokens=1-5 delims=|" %%A in ('curl.exe --silent --show-error --fail --max-time 10 "https://%api_domain%/geoiplookup/%address%?embed=txt" 2^>nul') do (
     set "country=%%B"
-    set "asn=%%C"
 
     if defined country (
-        if defined asn (
-            set "details=%address% [!country!, !asn!]"
+        if not "%%E" == "" (
+            set "details=%address% [%%D, %%C, !country!, %%E]"
+        ) else if not "%%D" == "" (
+            set "details=%address% [%%C, !country!, %%D]"
+        ) else if not "%%C" == "" (
+            set "details=%address% [!country!, %%C]"
         ) else (
             set "details=%address% [!country!]"
         )

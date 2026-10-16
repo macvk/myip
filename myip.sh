@@ -144,15 +144,21 @@ request_address() {
 address_details() {
     address=$1
     details=$(curl --silent --show-error --fail --max-time "$request_timeout" "https://${api_domain}/geoiplookup/${address}?embed=txt" 2>/dev/null || :)
-    country=$(printf '%s\n' "$details" | cut -d '|' -f 2)
-    asn=$(printf '%s\n' "$details" | cut -d '|' -f 3)
+    location=$(printf '%s\n' "$details" | awk -F '|' '
+        NF > 1 {
+            for (i = NF - 1; i >= 3; i--)
+                if ($i != "") values[++count] = $i
+            if ($2 != "") values[++count] = $2
+            if (NF > 2 && $NF != "") values[++count] = $NF
+            for (i = 1; i <= count; i++)
+                printf "%s%s", (i > 1 ? ", " : ""), values[i]
+        }
+    ')
 
-    if [ -z "$country" ]; then
+    if [ -z "$location" ]; then
         printf '%s\n' "$address"
-    elif [ -z "$asn" ]; then
-        printf '%s [%s]\n' "$address" "$country"
     else
-        printf '%s [%s, %s]\n' "$address" "$country" "$asn"
+        printf '%s [%s]\n' "$address" "$location"
     fi
 }
 
@@ -195,7 +201,6 @@ scan_family() {
 
 require_command curl
 require_command awk
-require_command cut
 require_command grep
 require_command tr
 

@@ -166,16 +166,18 @@ def address_details(address):
         return address
 
     fields = response.split('|')
-    country = fields[1].strip() if len(fields) > 1 else ''
-    asn = fields[2].strip() if len(fields) > 2 else ''
+    location = [value.strip() for value in reversed(fields[2:-1]) if value.strip()]
 
-    if not country:
+    if len(fields) > 1 and fields[1].strip():
+        location.append(fields[1].strip())
+
+    if len(fields) > 2 and fields[-1].strip():
+        location.append(fields[-1].strip())
+
+    if not location:
         return address
 
-    if not asn:
-        return '{} [{}]'.format(address, country)
-
-    return '{} [{}, {}]'.format(address, country, asn)
+    return '{} [{}]'.format(address, ', '.join(location))
 
 
 def print_addresses(family, addresses):
